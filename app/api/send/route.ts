@@ -3,13 +3,7 @@ import nodemailer from "nodemailer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-type SendBody = {
-  email: string;
-  title: string;
-  body: string;
-  link: string;
-};
+export const maxDuration = 60;
 
 let cachedTransporter: nodemailer.Transporter | null = null;
 
@@ -49,14 +43,44 @@ function buildHtml(body: string, link: string) {
 }
 
 export async function POST(req: Request) {
-  let payload: SendBody;
+  let email = "";
+  let title = "";
+  let body = "";
+  let link = "";
+  const attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
+
+  const contentType = req.headers.get("content-type") || "";
+
   try {
-    payload = await req.json();
+    if (contentType.includes("multipart/form-data")) {
+      const form = await req.formData();
+      email = String(form.get("email") ?? "").trim();
+      title = String(form.get("title") ?? "").trim();
+      body = String(form.get("body") ?? "");
+      link = String(form.get("link") ?? "").trim();
+
+      const files = form.getAll("attachments");
+      for (const f of files) {
+        if (f instanceof File && f.size > 0) {
+          const buf = Buffer.from(await f.arrayBuffer());
+          attachments.push({
+            filename: f.name,
+            content: buf,
+            contentType: f.type || undefined,
+          });
+        }
+      }
+    } else {
+      const payload = await req.json();
+      email = String(payload.email ?? "").trim();
+      title = String(payload.title ?? "").trim();
+      body = String(payload.body ?? "");
+      link = String(payload.link ?? "").trim();
+    }
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { email, title, body, link } = payload;
   if (!email || !title) {
     return NextResponse.json({ error: "email, title 필수" }, { status: 400 });
   }
@@ -72,6 +96,7 @@ export async function POST(req: Request) {
       subject: title,
       text: textBody,
       html: buildHtml(body, link),
+      attachments: attachments.length > 0 ? attachments : undefined,
     });
 
     return NextResponse.json({ ok: true });

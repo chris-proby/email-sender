@@ -18,6 +18,25 @@ export default function HomePage() {
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[]>([]);
   const [progress, setProgress] = useState(0);
+  const [attachments, setAttachments] = useState<File[]>([]);
+
+  function handleAttachments(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files) return;
+    setAttachments(Array.from(files));
+  }
+
+  function removeAttachment(idx: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function formatSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  }
+
+  const totalAttachmentSize = attachments.reduce((sum, f) => sum + f.size, 0);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -63,10 +82,17 @@ export default function HomePage() {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       try {
+        const form = new FormData();
+        form.append("email", row.email);
+        form.append("title", row.title);
+        form.append("body", row.body);
+        form.append("link", row.link);
+        for (const f of attachments) {
+          form.append("attachments", f, f.name);
+        }
         const res = await fetch("/api/send", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(row),
+          body: form,
         });
         const data = await res.json();
         if (!res.ok) {
@@ -113,9 +139,62 @@ export default function HomePage() {
         )}
       </section>
 
+      <section style={card}>
+        <label style={{ fontWeight: 600 }}>2. 첨부파일 (선택, 모든 수신자 공통)</label>
+        <input
+          type="file"
+          multiple
+          onChange={handleAttachments}
+          style={{ display: "block", marginTop: 12 }}
+        />
+        {attachments.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>
+              {attachments.length}개 · 총 {formatSize(totalAttachmentSize)}
+              {totalAttachmentSize > 4 * 1024 * 1024 && (
+                <span style={{ color: "#c00", marginLeft: 8 }}>
+                  ⚠ 4MB 이상은 Vercel 함수 제한으로 실패할 수 있음
+                </span>
+              )}
+            </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              {attachments.map((f, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "6px 10px",
+                    background: "#fafafa",
+                    border: "1px solid #eee",
+                    borderRadius: 6,
+                    fontSize: 13,
+                  }}
+                >
+                  <span>📎 {f.name} <span style={{ color: "#888" }}>({formatSize(f.size)})</span></span>
+                  <button
+                    onClick={() => removeAttachment(idx)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#c00",
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    제거
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
       {rows.length > 0 && (
         <section style={card}>
-          <label style={{ fontWeight: 600 }}>2. 미리보기 (앞 3건)</label>
+          <label style={{ fontWeight: 600 }}>3. 미리보기 (앞 3건)</label>
           <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
             {rows.slice(0, 3).map((row, idx) => (
               <div key={idx} style={preview}>
@@ -135,7 +214,7 @@ export default function HomePage() {
 
       {rows.length > 0 && (
         <section style={card}>
-          <label style={{ fontWeight: 600 }}>3. 발송</label>
+          <label style={{ fontWeight: 600 }}>4. 발송</label>
           <div style={{ marginTop: 12 }}>
             <button onClick={sendAll} disabled={sending} style={primaryBtn(sending)}>
               {sending ? `발송 중… (${progress}/${rows.length})` : `${rows.length}건 발송`}
