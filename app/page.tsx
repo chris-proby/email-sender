@@ -2,6 +2,16 @@
 
 import { useState } from "react";
 import Papa from "papaparse";
+import { upload } from "@vercel/blob/client";
+
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+type BlobAttachment = {
+  url: string;
+  filename: string;
+  contentType?: string;
+  size: number;
+};
 
 type Row = {
   email: string;
@@ -40,12 +50,47 @@ export default function HomePage() {
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[]>([]);
   const [progress, setProgress] = useState(0);
-  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachments, setAttachments] = useState<BlobAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<{ filename: string; pct: number } | null>(null);
 
-  function handleAttachments(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files) return;
-    setAttachments(Array.from(files));
+  async function handleAttachments(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+
+    setUploadError("");
+    const next: BlobAttachment[] = [];
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          throw new Error(`${file.name}: 25MB 초과 (Gmail 첨부 한도)`);
+        }
+        setUploadProgress({ filename: file.name, pct: 0 });
+        const blob = await upload(file.name, file, {
+          access: "public",
+          handleUploadUrl: "/api/upload-url",
+          onUploadProgress: (e: { percentage: number }) => {
+            setUploadProgress({ filename: file.name, pct: Math.round(e.percentage) });
+          },
+        });
+        next.push({
+          url: blob.url,
+          filename: file.name,
+          contentType: file.type || undefined,
+          size: file.size,
+        });
+      }
+      setAttachments((prev) => [...prev, ...next]);
+    } catch (err: any) {
+      setUploadError(err?.message ?? "업로드 실패");
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+      input.value = "";
+    }
   }
 
   function removeAttachment(idx: number) {
@@ -113,17 +158,17 @@ export default function HomePage() {
       const row = rows[i];
       const rendered = renderRow(row);
       try {
-        const form = new FormData();
-        form.append("email", rendered.email);
-        form.append("title", rendered.title);
-        form.append("body", rendered.body);
-        form.append("link", rendered.link);
-        for (const f of attachments) {
-          form.append("attachments", f, f.name);
-        }
         const res = await fetch("/api/send", {
           method: "POST",
-          body: form,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...rendered,
+            attachments: attachments.map((a) => ({
+              url: a.url,
+              filename: a.filename,
+              contentType: a.contentType,
+            })),
+          }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -171,22 +216,24 @@ export default function HomePage() {
       </section>
 
       <section style={card}>
-        <label style={{ fontWeight: 600 }}>2. 첨부파일 (선택, 모든 수신자 공통)</label>
+        <label style={{ fontWeight: 600 }}>2. 첨부파일 (선택, 모든 수신자 공통 · 파일당 최대 25MB)</label>
         <input
           type="file"
           multiple
+          disabled={uploading}
           onChange={handleAttachments}
           style={{ display: "block", marginTop: 12 }}
         />
+        {uploadProgress && (
+          <div style={{ marginTop: 10, fontSize: 13, color: "#555" }}>
+            ⬆ {uploadProgress.filename} 업로드 중… {uploadProgress.pct}%
+          </div>
+        )}
+        {uploadError && <div style={{ marginTop: 8, color: "#c00", fontSize: 13 }}>{uploadError}</div>}
         {attachments.length > 0 && (
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>
               {attachments.length}개 · 총 {formatSize(totalAttachmentSize)}
-              {totalAttachmentSize > 4 * 1024 * 1024 && (
-                <span style={{ color: "#c00", marginLeft: 8 }}>
-                  ⚠ 4MB 이상은 Vercel 함수 제한으로 실패할 수 있음
-                </span>
-              )}
             </div>
             <div style={{ display: "grid", gap: 6 }}>
               {attachments.map((f, idx) => (
@@ -203,7 +250,7 @@ export default function HomePage() {
                     fontSize: 13,
                   }}
                 >
-                  <span>📎 {f.name} <span style={{ color: "#888" }}>({formatSize(f.size)})</span></span>
+                  <span>📎 {f.filename} <span style={{ color: "#888" }}>({formatSize(f.size)})</span></span>
                   <button
                     onClick={() => removeAttachment(idx)}
                     style={{
@@ -266,8 +313,8 @@ export default function HomePage() {
         <section style={card}>
           <label style={{ fontWeight: 600 }}>4. 발송</label>
           <div style={{ marginTop: 12 }}>
-            <button onClick={sendAll} disabled={sending} style={primaryBtn(sending)}>
-              {sending ? `발송 중… (${progress}/${rows.length})` : `${rows.length}건 발송`}
+            <button onClick={sendAll} disabled={sending || uploading} style={primaryBtn(sending || uploading)}>
+              {sending ? `발송 중… (${progress}/${rows.length})` : uploading ? "업로드 중…" : `${rows.length}건 발송`}
             </button>
           </div>
           {results.length > 0 && (

@@ -41,44 +41,57 @@ function buildHtml(body: string, link: string) {
   </div>`;
 }
 
+const extMime: Record<string, string> = {
+  pdf: "application/pdf",
+  csv: "text/csv",
+  txt: "text/plain",
+  html: "text/html",
+  json: "application/json",
+  xml: "application/xml",
+  zip: "application/zip",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  hwp: "application/x-hwp",
+  mp4: "video/mp4",
+  mp3: "audio/mpeg",
+};
+
+function detectContentType(filename: string, browserType?: string) {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  if (extMime[ext]) return extMime[ext];
+  if (browserType && browserType !== "application/octet-stream") return browserType;
+  return "application/octet-stream";
+}
+
+type BlobAttachmentRef = { url: string; filename: string; contentType?: string };
+
+async function fetchBlobAttachment(ref: BlobAttachmentRef) {
+  const res = await fetch(ref.url);
+  if (!res.ok) throw new Error(`첨부 다운로드 실패 (${res.status}): ${ref.filename}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  return {
+    filename: ref.filename,
+    content: buf,
+    contentType: detectContentType(ref.filename, ref.contentType),
+  };
+}
+
 export async function POST(req: Request) {
   let email = "";
   let title = "";
   let body = "";
   let link = "";
-  const attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
-
-  const extMime: Record<string, string> = {
-    pdf: "application/pdf",
-    csv: "text/csv",
-    txt: "text/plain",
-    html: "text/html",
-    json: "application/json",
-    xml: "application/xml",
-    zip: "application/zip",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    svg: "image/svg+xml",
-    doc: "application/msword",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    xls: "application/vnd.ms-excel",
-    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ppt: "application/vnd.ms-powerpoint",
-    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    hwp: "application/x-hwp",
-    mp4: "video/mp4",
-    mp3: "audio/mpeg",
-  };
-
-  function detectContentType(filename: string, browserType: string) {
-    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-    if (extMime[ext]) return extMime[ext];
-    if (browserType && browserType !== "application/octet-stream") return browserType;
-    return "application/octet-stream";
-  }
+  let attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
 
   const contentType = req.headers.get("content-type") || "";
 
@@ -107,9 +120,14 @@ export async function POST(req: Request) {
       title = String(payload.title ?? "").trim();
       body = String(payload.body ?? "");
       link = String(payload.link ?? "").trim();
+
+      const refs = Array.isArray(payload.attachments) ? (payload.attachments as BlobAttachmentRef[]) : [];
+      if (refs.length > 0) {
+        attachments = await Promise.all(refs.map(fetchBlobAttachment));
+      }
     }
-  } catch {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "Invalid request body" }, { status: 400 });
   }
 
   if (!email || !title) {
