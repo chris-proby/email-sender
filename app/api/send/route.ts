@@ -49,6 +49,38 @@ export async function POST(req: Request) {
   let link = "";
   const attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
 
+  const extMime: Record<string, string> = {
+    pdf: "application/pdf",
+    csv: "text/csv",
+    txt: "text/plain",
+    html: "text/html",
+    json: "application/json",
+    xml: "application/xml",
+    zip: "application/zip",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    hwp: "application/x-hwp",
+    mp4: "video/mp4",
+    mp3: "audio/mpeg",
+  };
+
+  function detectContentType(filename: string, browserType: string) {
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+    if (extMime[ext]) return extMime[ext];
+    if (browserType && browserType !== "application/octet-stream") return browserType;
+    return "application/octet-stream";
+  }
+
   const contentType = req.headers.get("content-type") || "";
 
   try {
@@ -66,7 +98,7 @@ export async function POST(req: Request) {
           attachments.push({
             filename: f.name,
             content: buf,
-            contentType: f.type || undefined,
+            contentType: detectContentType(f.name, f.type),
           });
         }
       }
