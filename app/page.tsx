@@ -69,7 +69,7 @@ export default function HomePage() {
     setResults([]);
     setProgress(0);
 
-    Papa.parse<Row>(file, {
+    Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (r) => {
@@ -82,7 +82,7 @@ export default function HomePage() {
           return;
         }
         const reserved = new Set(["email", "title", "body", "link"]);
-        const cleaned = (r.data as Record<string, string>[])
+        const cleaned: Row[] = r.data
           .map((row) => {
             const extras: Record<string, string> = {};
             for (const [k, v] of Object.entries(row)) {
