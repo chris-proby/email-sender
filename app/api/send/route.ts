@@ -33,8 +33,7 @@ function escapeHtml(s: string) {
 function buildHtml(body: string, link: string) {
   const bodyHtml = escapeHtml(body).replace(/\n/g, "<br/>");
   const linkHtml = link
-    ? `<p style="margin-top:24px"><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;background:#1a1a1a;color:white;text-decoration:none;border-radius:6px">자세히 보기</a></p>
-       <p style="margin-top:8px;font-size:12px;color:#888">${escapeHtml(link)}</p>`
+    ? `<p style="margin-top:24px"><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 22px;background:#1a1a1a;color:white;text-decoration:none;border-radius:8px;font-weight:600">인터뷰 시작하기</a></p>`
     : "";
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a">
     <div>${bodyHtml}</div>
@@ -120,7 +119,7 @@ export async function POST(req: Request) {
   try {
     const transporter = getTransporter();
     const from = process.env.GMAIL_FROM || process.env.GMAIL_USER!;
-    const textBody = link ? `${body}\n\n${link}` : body;
+    const textBody = link ? `${body}\n\n인터뷰 시작하기: ${link}` : body;
 
     await transporter.sendMail({
       from,

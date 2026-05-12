@@ -3,7 +3,30 @@
 import { useState } from "react";
 import Papa from "papaparse";
 
-type Row = { email: string; title: string; body: string; link: string };
+type Row = {
+  email: string;
+  title: string;
+  body: string;
+  link: string;
+  extras: Record<string, string>;
+};
+
+function substitute(template: string, vars: Record<string, string>) {
+  return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, key) => {
+    const v = vars[key];
+    return v == null ? "" : v;
+  });
+}
+
+function renderRow(row: Row) {
+  const vars = { email: row.email, link: row.link, ...row.extras };
+  return {
+    email: row.email,
+    title: substitute(row.title, vars),
+    body: substitute(row.body, vars),
+    link: row.link,
+  };
+}
 
 type SendResult = {
   email: string;
@@ -58,13 +81,21 @@ export default function HomePage() {
           setRows([]);
           return;
         }
-        const cleaned = r.data
-          .map((row) => ({
-            email: String(row.email ?? "").trim(),
-            title: String(row.title ?? "").trim(),
-            body: String(row.body ?? ""),
-            link: String(row.link ?? "").trim(),
-          }))
+        const reserved = new Set(["email", "title", "body", "link"]);
+        const cleaned = (r.data as Record<string, string>[])
+          .map((row) => {
+            const extras: Record<string, string> = {};
+            for (const [k, v] of Object.entries(row)) {
+              if (!reserved.has(k) && k) extras[k] = String(v ?? "").trim();
+            }
+            return {
+              email: String(row.email ?? "").trim(),
+              title: String(row.title ?? "").trim(),
+              body: String(row.body ?? ""),
+              link: String(row.link ?? "").trim(),
+              extras,
+            };
+          })
           .filter((row) => row.email);
         setRows(cleaned);
       },
@@ -81,12 +112,13 @@ export default function HomePage() {
     const collected: SendResult[] = [];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      const rendered = renderRow(row);
       try {
         const form = new FormData();
-        form.append("email", row.email);
-        form.append("title", row.title);
-        form.append("body", row.body);
-        form.append("link", row.link);
+        form.append("email", rendered.email);
+        form.append("title", rendered.title);
+        form.append("body", rendered.body);
+        form.append("link", rendered.link);
         for (const f of attachments) {
           form.append("attachments", f, f.name);
         }
@@ -119,7 +151,7 @@ export default function HomePage() {
     <main style={{ maxWidth: 880, margin: "40px auto", padding: "0 20px" }}>
       <h1 style={{ fontSize: 28, marginBottom: 8 }}>이메일 일괄 발송</h1>
       <p style={{ color: "#666", marginTop: 0 }}>
-        CSV 컬럼: <code>email, title, body, link</code> · Gmail SMTP로 1초 간격 순차 발송
+        CSV 필수 컬럼: <code>email, title, body, link</code> · 추가 컬럼은 <code>{`{{컬럼명}}`}</code>으로 title/body에 치환 (예: <code>{`{{name}}`}</code>, <code>{`{{candidate}}`}</code>)
       </p>
 
       <section style={card}>
@@ -196,18 +228,37 @@ export default function HomePage() {
         <section style={card}>
           <label style={{ fontWeight: 600 }}>3. 미리보기 (앞 3건)</label>
           <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-            {rows.slice(0, 3).map((row, idx) => (
-              <div key={idx} style={preview}>
-                <div style={{ fontSize: 12, color: "#888" }}>To: {row.email}</div>
-                <div style={{ fontWeight: 600, marginTop: 4 }}>{row.title}</div>
-                <div style={{ marginTop: 8, whiteSpace: "pre-wrap", fontSize: 14 }}>{row.body}</div>
-                {row.link && (
-                  <div style={{ marginTop: 8, fontSize: 14 }}>
-                    🔗 <a href={row.link} target="_blank" rel="noreferrer">{row.link}</a>
-                  </div>
-                )}
-              </div>
-            ))}
+            {rows.slice(0, 3).map((row, idx) => {
+              const r = renderRow(row);
+              return (
+                <div key={idx} style={preview}>
+                  <div style={{ fontSize: 12, color: "#888" }}>To: {r.email}</div>
+                  <div style={{ fontWeight: 600, marginTop: 4 }}>{r.title}</div>
+                  <div style={{ marginTop: 8, whiteSpace: "pre-wrap", fontSize: 14 }}>{r.body}</div>
+                  {r.link && (
+                    <div style={{ marginTop: 12 }}>
+                      <a
+                        href={r.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: "inline-block",
+                          padding: "10px 18px",
+                          background: "#1a1a1a",
+                          color: "white",
+                          textDecoration: "none",
+                          borderRadius: 8,
+                          fontSize: 14,
+                          fontWeight: 600,
+                        }}
+                      >
+                        인터뷰 시작하기
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
