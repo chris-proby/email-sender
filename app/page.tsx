@@ -163,6 +163,7 @@ export default function HomePage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ...rendered,
+            baseUrl: typeof window !== "undefined" ? window.location.origin : "",
             attachments: attachments.map((a) => ({
               url: a.url,
               filename: a.filename,
@@ -193,7 +194,10 @@ export default function HomePage() {
 
   return (
     <main style={{ maxWidth: 880, margin: "40px auto", padding: "0 20px" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>이메일 일괄 발송</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ fontSize: 28, margin: 0 }}>이메일 일괄 발송</h1>
+        <a href="/dashboard" style={{ fontSize: 14 }}>📊 발송 대시보드 →</a>
+      </div>
       <p style={{ color: "#666", marginTop: 0 }}>
         필수 컬럼: <code>email, title, body, link</code> · 추가 컬럼은 <code>{`{컬럼명}`}</code> 또는 <code>{`{{컬럼명}}`}</code>로 title/body에 치환 (예: <code>{`{name}`}</code>, <code>{`{candidate}`}</code>, 한글 변수명도 지원)
       </p>
