@@ -12,10 +12,9 @@ type Row = {
 };
 
 function substitute(template: string, vars: Record<string, string>) {
-  return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, key) => {
-    const v = vars[key];
-    return v == null ? "" : v;
-  });
+  return template
+    .replace(/\{\{\s*([^\s{}]+)\s*\}\}/g, (_, key) => (vars[key] != null ? vars[key] : ""))
+    .replace(/\{\s*([^\s{}]+)\s*\}/g, (match, key) => (key in vars ? vars[key] : match));
 }
 
 function renderRow(row: Row) {
@@ -151,7 +150,7 @@ export default function HomePage() {
     <main style={{ maxWidth: 880, margin: "40px auto", padding: "0 20px" }}>
       <h1 style={{ fontSize: 28, marginBottom: 8 }}>이메일 일괄 발송</h1>
       <p style={{ color: "#666", marginTop: 0 }}>
-        CSV 필수 컬럼: <code>email, title, body, link</code> · 추가 컬럼은 <code>{`{{컬럼명}}`}</code>으로 title/body에 치환 (예: <code>{`{{name}}`}</code>, <code>{`{{candidate}}`}</code>)
+        필수 컬럼: <code>email, title, body, link</code> · 추가 컬럼은 <code>{`{컬럼명}`}</code> 또는 <code>{`{{컬럼명}}`}</code>로 title/body에 치환 (예: <code>{`{name}`}</code>, <code>{`{candidate}`}</code>, 한글 변수명도 지원)
       </p>
 
       <section style={card}>
