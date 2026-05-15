@@ -100,6 +100,11 @@ export default function HomePage() {
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[]>([]);
   const [progress, setProgress] = useState(0);
+  const [intervalSec, setIntervalSec] = useState(3);
+  const [useBatch, setUseBatch] = useState(false);
+  const [batchSize, setBatchSize] = useState(20);
+  const [batchPauseSec, setBatchPauseSec] = useState(60);
+  const [pauseInfo, setPauseInfo] = useState("");
   const [attachments, setAttachments] = useState<BlobAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -245,10 +250,21 @@ export default function HomePage() {
       setResults([...collected]);
       setProgress(i + 1);
       if (i < rows.length - 1) {
-        await new Promise((r) => setTimeout(r, 1000));
+        const sentSoFar = i + 1;
+        if (useBatch && batchSize > 0 && sentSoFar % batchSize === 0) {
+          // Batch pause
+          for (let s = batchPauseSec; s > 0; s--) {
+            setPauseInfo(`배치 휴식: ${s}s 후 재개`);
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+          setPauseInfo("");
+        } else {
+          await new Promise((r) => setTimeout(r, Math.max(0, intervalSec * 1000)));
+        }
       }
     }
     setSending(false);
+    setPauseInfo("");
   }
 
   const okCount = results.filter((r) => r.status === "ok").length;
@@ -391,10 +407,78 @@ export default function HomePage() {
       {rows.length > 0 && (
         <section style={card}>
           <label style={{ fontWeight: 600 }}>4. 발송</label>
+
+          <div style={{ marginTop: 12, padding: 12, background: "#fafafa", border: "1px solid #eee", borderRadius: 8, display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <label style={{ fontSize: 13, color: "#444" }}>
+                발송 간격:
+                <input
+                  type="number"
+                  min={0}
+                  max={3600}
+                  value={intervalSec}
+                  disabled={sending}
+                  onChange={(e) => setIntervalSec(Math.max(0, Number(e.target.value) || 0))}
+                  style={{ ...numInput, marginLeft: 6 }}
+                />
+                <span style={{ color: "#888", marginLeft: 4 }}>초</span>
+              </label>
+              <span style={{ fontSize: 12, color: "#888" }}>
+                ≈ {intervalSec > 0 ? Math.round(60 / intervalSec) : "∞"}/분 ·
+                {" "}예상 소요{" "}
+                {(() => {
+                  const totalSec = intervalSec * Math.max(0, rows.length - 1) +
+                    (useBatch && batchSize > 0
+                      ? Math.floor(rows.length / batchSize) * batchPauseSec
+                      : 0);
+                  const m = Math.floor(totalSec / 60);
+                  const s = totalSec % 60;
+                  return m > 0 ? `${m}분 ${s}초` : `${s}초`;
+                })()}
+              </span>
+            </div>
+
+            <label style={{ fontSize: 13, color: "#444", display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={useBatch}
+                disabled={sending}
+                onChange={(e) => setUseBatch(e.target.checked)}
+              />
+              배치 휴식 사용:
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                value={batchSize}
+                disabled={sending || !useBatch}
+                onChange={(e) => setBatchSize(Math.max(1, Number(e.target.value) || 1))}
+                style={numInput}
+              />
+              <span style={{ color: "#888" }}>건마다</span>
+              <input
+                type="number"
+                min={1}
+                max={3600}
+                value={batchPauseSec}
+                disabled={sending || !useBatch}
+                onChange={(e) => setBatchPauseSec(Math.max(1, Number(e.target.value) || 1))}
+                style={numInput}
+              />
+              <span style={{ color: "#888" }}>초 휴식</span>
+            </label>
+
+            <div style={{ fontSize: 12, color: "#888" }}>
+              📌 권장: Google Workspace (proby.io)는 분당 ~10~20건이 안전선.
+              일일 한도 ~2,000건.
+            </div>
+          </div>
+
           <div style={{ marginTop: 12 }}>
             <button onClick={sendAll} disabled={sending || uploading} style={primaryBtn(sending || uploading)}>
               {sending ? `발송 중… (${progress}/${rows.length})` : uploading ? "업로드 중…" : `${rows.length}건 발송`}
             </button>
+            {pauseInfo && <span style={{ marginLeft: 12, fontSize: 13, color: "#06c" }}>⏸ {pauseInfo}</span>}
           </div>
           {results.length > 0 && (
             <div style={{ marginTop: 16 }}>
@@ -448,3 +532,11 @@ const primaryBtn = (disabled: boolean): React.CSSProperties => ({
   fontSize: 15,
   cursor: disabled ? "not-allowed" : "pointer",
 });
+
+const numInput: React.CSSProperties = {
+  width: 64,
+  padding: "4px 6px",
+  border: "1px solid #ccc",
+  borderRadius: 4,
+  fontSize: 13,
+};
