@@ -100,7 +100,8 @@ export default function HomePage() {
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<SendResult[]>([]);
   const [progress, setProgress] = useState(0);
-  const [intervalSec, setIntervalSec] = useState(3);
+  const [intervalSec, setIntervalSec] = useState(10);
+  const [jitterSec, setJitterSec] = useState(2);
   const [useBatch, setUseBatch] = useState(false);
   const [batchSize, setBatchSize] = useState(20);
   const [batchPauseSec, setBatchPauseSec] = useState(60);
@@ -259,7 +260,12 @@ export default function HomePage() {
           }
           setPauseInfo("");
         } else {
-          await new Promise((r) => setTimeout(r, Math.max(0, intervalSec * 1000)));
+          // Apply jitter so the interval looks human, not a precise bot
+          // metronome. Effective wait = interval ± jitter (uniform).
+          const base = intervalSec * 1000;
+          const j = jitterSec > 0 ? (Math.random() * 2 - 1) * jitterSec * 1000 : 0;
+          const waitMs = Math.max(0, base + j);
+          await new Promise((r) => setTimeout(r, waitMs));
         }
       }
     }
@@ -423,8 +429,23 @@ export default function HomePage() {
                 />
                 <span style={{ color: "#888", marginLeft: 4 }}>초</span>
               </label>
+              <label style={{ fontSize: 13, color: "#444" }}>
+                jitter ±
+                <input
+                  type="number"
+                  min={0}
+                  max={Math.max(0, intervalSec)}
+                  value={jitterSec}
+                  disabled={sending}
+                  onChange={(e) => setJitterSec(Math.max(0, Number(e.target.value) || 0))}
+                  style={{ ...numInput, marginLeft: 6 }}
+                />
+                <span style={{ color: "#888", marginLeft: 4 }}>초</span>
+              </label>
               <span style={{ fontSize: 12, color: "#888" }}>
                 ≈ {intervalSec > 0 ? Math.round(60 / intervalSec) : "∞"}/분 ·
+                실제 간격{" "}
+                {Math.max(0, intervalSec - jitterSec)}~{intervalSec + jitterSec}초 ·
                 {" "}예상 소요{" "}
                 {(() => {
                   const totalSec = intervalSec * Math.max(0, rows.length - 1) +
@@ -469,8 +490,8 @@ export default function HomePage() {
             </label>
 
             <div style={{ fontSize: 12, color: "#888" }}>
-              📌 권장: Google Workspace (proby.io)는 분당 ~10~20건이 안전선.
-              일일 한도 ~2,000건.
+              📌 권장: 10초 ± 2초 jitter (≈6건/분). Workspace 일일 한도 ~2,000건.
+              jitter는 정확한 간격에서 오는 봇 시그널을 완화합니다.
             </div>
           </div>
 
