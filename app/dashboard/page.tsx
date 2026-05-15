@@ -8,7 +8,16 @@ export const revalidate = 0;
 function fmt(ts?: number) {
   if (!ts) return "-";
   const d = new Date(ts);
-  return d.toLocaleString("ko-KR", { hour12: false });
+  return d.toLocaleString("ko-KR", {
+    hour12: false,
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function summary(records: SendRecord[]) {
@@ -57,7 +66,7 @@ export default async function Dashboard() {
       </section>
 
       <p style={{ marginTop: 16, fontSize: 12, color: "#888" }}>
-        ⓘ 오픈 추적은 트래킹 픽셀 기반입니다. Gmail의 이미지 차단 정책으로 인해 일부 오픈은 집계되지 않을 수 있고, Apple Mail은 사전 로딩으로 과대 집계될 수 있습니다. 클릭 추적이 더 정확합니다.
+        ⓘ 오픈 추적은 트래킹 픽셀 기반입니다. Gmail의 이미지 차단 정책으로 인해 일부 오픈은 집계되지 않을 수 있고, Apple Mail은 사전 로딩으로 과대 집계될 수 있습니다. 클릭 추적이 더 정확합니다. · 모든 시각은 한국 표준시(KST) 기준
       </p>
 
       <section style={{ marginTop: 20, overflowX: "auto" }}>
