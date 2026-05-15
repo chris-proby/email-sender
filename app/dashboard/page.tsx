@@ -15,12 +15,15 @@ function summary(records: SendRecord[]) {
   const total = records.length;
   const opened = records.filter((r) => r.opens > 0).length;
   const clicked = records.filter((r) => r.clicks > 0).length;
+  const downloaded = records.filter((r) => r.downloadClicks > 0).length;
   return {
     total,
     opened,
     clicked,
+    downloaded,
     openRate: total ? Math.round((opened / total) * 100) : 0,
     clickRate: total ? Math.round((clicked / total) * 100) : 0,
+    downloadRate: total ? Math.round((downloaded / total) * 100) : 0,
   };
 }
 
@@ -46,10 +49,11 @@ export default async function Dashboard() {
         <Link href="/" style={{ fontSize: 14 }}>← 발송 페이지로</Link>
       </div>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginTop: 20 }}>
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 20 }}>
         <Stat label="총 발송" value={`${s.total}건`} />
         <Stat label="오픈" value={`${s.opened}건 (${s.openRate}%)`} hint="고유 수신자 기준" />
-        <Stat label="CTA 클릭" value={`${s.clicked}건 (${s.clickRate}%)`} hint="고유 수신자 기준" />
+        <Stat label="Proby CTA 클릭" value={`${s.clicked}건 (${s.clickRate}%)`} hint="인터뷰 시작하기 버튼" />
+        <Stat label="첨부 다운로드 클릭" value={`${s.downloaded}건 (${s.downloadRate}%)`} hint="본문 내 다운로드 링크" />
       </section>
 
       <p style={{ marginTop: 16, fontSize: 12, color: "#888" }}>
@@ -64,24 +68,28 @@ export default async function Dashboard() {
               <th style={th}>수신자</th>
               <th style={th}>제목</th>
               <th style={{ ...th, textAlign: "center" }}>오픈</th>
-              <th style={{ ...th, textAlign: "center" }}>클릭</th>
+              <th style={{ ...th, textAlign: "center" }}>CTA</th>
+              <th style={{ ...th, textAlign: "center" }}>다운로드</th>
               <th style={th}>최초 오픈</th>
-              <th style={th}>최초 클릭</th>
+              <th style={th}>최초 CTA</th>
+              <th style={th}>최초 다운로드</th>
             </tr>
           </thead>
           <tbody>
             {records.length === 0 ? (
-              <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#888" }}>아직 발송 기록이 없습니다.</td></tr>
+              <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#888" }}>아직 발송 기록이 없습니다.</td></tr>
             ) : (
               records.map((r) => (
                 <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
                   <td style={td}>{fmt(r.sentAt)}</td>
                   <td style={td}>{r.email}</td>
-                  <td style={{ ...td, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</td>
+                  <td style={{ ...td, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</td>
                   <td style={{ ...td, textAlign: "center", color: r.opens > 0 ? "#0a7" : "#aaa", fontWeight: 600 }}>{r.opens}</td>
                   <td style={{ ...td, textAlign: "center", color: r.clicks > 0 ? "#06c" : "#aaa", fontWeight: 600 }}>{r.clicks}</td>
+                  <td style={{ ...td, textAlign: "center", color: r.downloadClicks > 0 ? "#a60" : "#aaa", fontWeight: 600 }}>{r.downloadClicks}</td>
                   <td style={td}>{fmt(r.firstOpenedAt)}</td>
                   <td style={td}>{fmt(r.firstClickedAt)}</td>
+                  <td style={td}>{fmt(r.firstDownloadAt)}</td>
                 </tr>
               ))
             )}

@@ -8,13 +8,14 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   const to = url.searchParams.get("to");
+  const kind = url.searchParams.get("kind") === "download" ? "download" : "cta";
 
   if (id) {
     // Run AFTER the redirect is sent so the Redis round-trip can't be
     // lost when the function instance is reclaimed.
     after(async () => {
       try {
-        await recordClick(id);
+        await recordClick(id, kind);
       } catch {}
     });
   }

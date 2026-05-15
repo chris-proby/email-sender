@@ -1,5 +1,7 @@
 import { redis, hasRedisConfig } from "./redis";
 
+export type ClickKind = "cta" | "download";
+
 export type SendRecord = {
   id: string;
   email: string;
@@ -8,10 +10,13 @@ export type SendRecord = {
   sentAt: number;
   opens: number;
   clicks: number;
+  downloadClicks: number;
   firstOpenedAt?: number;
   lastOpenedAt?: number;
   firstClickedAt?: number;
   lastClickedAt?: number;
+  firstDownloadAt?: number;
+  lastDownloadAt?: number;
 };
 
 export function newSendId() {
@@ -30,6 +35,7 @@ export async function recordSend(id: string, data: { email: string; title: strin
     sentAt: now,
     opens: 0,
     clicks: 0,
+    downloadClicks: 0,
   });
   await redis.zadd("sends:index", { score: now, member: id });
 }
@@ -44,14 +50,20 @@ export async function recordOpen(id: string) {
   await redis.hset(`send:${id}`, { lastOpenedAt: now });
 }
 
-export async function recordClick(id: string) {
+export async function recordClick(id: string, kind: ClickKind = "cta") {
   if (!hasRedisConfig()) return;
   const exists = await redis.exists(`send:${id}`);
   if (!exists) return;
   const now = Date.now();
-  await redis.hincrby(`send:${id}`, "clicks", 1);
-  await redis.hsetnx(`send:${id}`, "firstClickedAt", now);
-  await redis.hset(`send:${id}`, { lastClickedAt: now });
+  if (kind === "download") {
+    await redis.hincrby(`send:${id}`, "downloadClicks", 1);
+    await redis.hsetnx(`send:${id}`, "firstDownloadAt", now);
+    await redis.hset(`send:${id}`, { lastDownloadAt: now });
+  } else {
+    await redis.hincrby(`send:${id}`, "clicks", 1);
+    await redis.hsetnx(`send:${id}`, "firstClickedAt", now);
+    await redis.hset(`send:${id}`, { lastClickedAt: now });
+  }
 }
 
 export async function listSends(limit = 500): Promise<SendRecord[]> {
@@ -73,10 +85,13 @@ export async function listSends(limit = 500): Promise<SendRecord[]> {
       sentAt: Number(r.sentAt ?? 0),
       opens: Number(r.opens ?? 0),
       clicks: Number(r.clicks ?? 0),
+      downloadClicks: Number(r.downloadClicks ?? 0),
       firstOpenedAt: toNum(r.firstOpenedAt),
       lastOpenedAt: toNum(r.lastOpenedAt),
       firstClickedAt: toNum(r.firstClickedAt),
       lastClickedAt: toNum(r.lastClickedAt),
+      firstDownloadAt: toNum(r.firstDownloadAt),
+      lastDownloadAt: toNum(r.lastDownloadAt),
     };
   });
 }

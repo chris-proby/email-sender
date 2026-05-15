@@ -220,11 +220,17 @@ export async function POST(req: Request) {
   } else if (refs.length > 0) {
     const totalReferenced = refs.reduce((s, r) => s + (r.size ?? 0), 0);
     if (totalReferenced > INLINE_ATTACHMENT_THRESHOLD) {
-      downloadEntries = refs.map((r) => ({
-        url: r.url,
-        filename: normalizeFilename(r.filename),
-        size: r.size ?? 0,
-      }));
+      downloadEntries = refs.map((r) => {
+        const target = r.url;
+        const tracked = resolvedBase
+          ? `${resolvedBase}/api/track/click?id=${sendId}&kind=download&to=${encodeURIComponent(target)}`
+          : target;
+        return {
+          url: tracked,
+          filename: normalizeFilename(r.filename),
+          size: r.size ?? 0,
+        };
+      });
     } else {
       finalAttachments = await Promise.all(refs.map(fetchBlobAttachment));
     }
