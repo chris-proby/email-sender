@@ -1,6 +1,7 @@
 import { redis, hasRedisConfig } from "./redis";
 
 export type ClickKind = "cta" | "download";
+export type EventKind = "open" | "cta" | "download";
 
 export type SendRecord = {
   id: string;
@@ -23,6 +24,21 @@ export function newSendId() {
   return (globalThis.crypto?.randomUUID() ?? `${Date.now()}-${Math.random()}`)
     .replace(/-/g, "")
     .slice(0, 16);
+}
+
+async function logEvent(kind: EventKind, sendId: string, ts: number) {
+  const member = `${sendId}:${ts}:${Math.random().toString(36).slice(2, 8)}`;
+  await redis.zadd(`events:${kind}`, { score: ts, member });
+}
+
+export async function getEventTimestamps(kind: EventKind, sinceMs: number): Promise<number[]> {
+  if (!hasRedisConfig()) return [];
+  const members = (await redis.zrange<string[]>(`events:${kind}`, sinceMs, Date.now(), {
+    byScore: true,
+  })) ?? [];
+  return members
+    .map((m) => Number(m.split(":")[1]))
+    .filter((n) => Number.isFinite(n));
 }
 
 export async function recordSend(id: string, data: { email: string; title: string; link: string }) {
@@ -48,6 +64,7 @@ export async function recordOpen(id: string) {
   await redis.hincrby(`send:${id}`, "opens", 1);
   await redis.hsetnx(`send:${id}`, "firstOpenedAt", now);
   await redis.hset(`send:${id}`, { lastOpenedAt: now });
+  await logEvent("open", id, now);
 }
 
 export async function recordClick(id: string, kind: ClickKind = "cta") {
@@ -64,6 +81,7 @@ export async function recordClick(id: string, kind: ClickKind = "cta") {
     await redis.hsetnx(`send:${id}`, "firstClickedAt", now);
     await redis.hset(`send:${id}`, { lastClickedAt: now });
   }
+  await logEvent(kind, id, now);
 }
 
 export async function listSends(limit = 500): Promise<SendRecord[]> {
