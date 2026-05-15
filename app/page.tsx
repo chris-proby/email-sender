@@ -22,8 +22,35 @@ type Row = {
   title: string;
   body: string;
   link: string;
-  extras: Record<string, string>;
+  vars: Record<string, string>;
 };
+
+type ColumnMap = { email: string; title: string; body: string; link: string };
+
+const HEADER_ALIASES: Record<keyof ColumnMap, string[]> = {
+  email: ["email", "name email", "e-mail", "mail", "이메일", "메일", "수신자"],
+  title: ["title", "subject", "제목"],
+  body: ["body", "content", "본문", "내용"],
+  link: ["link", "url", "interview link", "링크", "주소"],
+};
+
+function resolveColumns(headers: string[]): {
+  map: Partial<ColumnMap>;
+  missing: (keyof ColumnMap)[];
+} {
+  const trimmed = headers.map((h) => h.trim());
+  const lower = new Map<string, string>();
+  for (const h of trimmed) lower.set(h.toLowerCase(), h);
+
+  const map: Partial<ColumnMap> = {};
+  const missing: (keyof ColumnMap)[] = [];
+  (Object.keys(HEADER_ALIASES) as (keyof ColumnMap)[]).forEach((slot) => {
+    const hit = HEADER_ALIASES[slot].map((a) => lower.get(a.toLowerCase())).find(Boolean);
+    if (hit) map[slot] = hit;
+    else missing.push(slot);
+  });
+  return { map, missing };
+}
 
 function substitute(template: string, vars: Record<string, string>) {
   return template
@@ -32,11 +59,10 @@ function substitute(template: string, vars: Record<string, string>) {
 }
 
 function renderRow(row: Row) {
-  const vars = { email: row.email, link: row.link, ...row.extras };
   return {
     email: row.email,
-    title: substitute(row.title, vars),
-    body: substitute(row.body, vars),
+    title: substitute(row.title, row.vars),
+    body: substitute(row.body, row.vars),
     link: row.link,
   };
 }
@@ -49,6 +75,7 @@ type SendResult = {
 
 export default function HomePage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [columnMap, setColumnMap] = useState<Partial<ColumnMap>>({});
   const [fileName, setFileName] = useState("");
   const [parseError, setParseError] = useState("");
   const [sending, setSending] = useState(false);
@@ -122,28 +149,37 @@ export default function HomePage() {
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (h) => h.trim(),
       complete: (r) => {
-        const required = ["email", "title", "body", "link"];
-        const fields = r.meta.fields ?? [];
-        const missing = required.filter((c) => !fields.includes(c));
+        const fields = (r.meta.fields ?? []).map((f) => f.trim());
+        const { map, missing } = resolveColumns(fields);
         if (missing.length) {
-          setParseError(`누락된 컬럼: ${missing.join(", ")}`);
+          setParseError(
+            `다음 컬럼을 찾을 수 없습니다: ${missing.join(", ")}. CSV 헤더를 확인해주세요.`,
+          );
           setRows([]);
+          setColumnMap({});
           return;
         }
-        const reserved = new Set(["email", "title", "body", "link"]);
+        setColumnMap(map);
         const cleaned: Row[] = r.data
-          .map((row) => {
-            const extras: Record<string, string> = {};
+          .map((rawRow) => {
+            // Normalize keys (trim) so trailing-space headers still match.
+            const row: Record<string, string> = {};
+            for (const [k, v] of Object.entries(rawRow)) {
+              if (!k) continue;
+              row[k.trim()] = String(v ?? "");
+            }
+            const vars: Record<string, string> = {};
             for (const [k, v] of Object.entries(row)) {
-              if (!reserved.has(k) && k) extras[k] = String(v ?? "").trim();
+              vars[k] = v.trim();
             }
             return {
-              email: String(row.email ?? "").trim(),
-              title: String(row.title ?? "").trim(),
-              body: String(row.body ?? ""),
-              link: String(row.link ?? "").trim(),
-              extras,
+              email: (row[map.email!] ?? "").trim(),
+              title: (row[map.title!] ?? "").trim(),
+              body: row[map.body!] ?? "",
+              link: (row[map.link!] ?? "").trim(),
+              vars,
             };
           })
           .filter((row) => row.email);
@@ -206,7 +242,7 @@ export default function HomePage() {
         <a href="/dashboard" style={{ fontSize: 14 }}>📊 발송 대시보드 →</a>
       </div>
       <p style={{ color: "#666", marginTop: 0 }}>
-        필수 컬럼: <code>email, title, body, link</code> · 추가 컬럼은 <code>{`{컬럼명}`}</code> 또는 <code>{`{{컬럼명}}`}</code>로 title/body에 치환 (예: <code>{`{name}`}</code>, <code>{`{candidate}`}</code>, <code>{`{code}`}</code>, 한글 변수명도 지원)
+        필수 컬럼(별칭 자동 인식): 수신자(<code>email</code> | <code>name email</code> | <code>이메일</code>), 제목(<code>title</code> | <code>Title</code> | <code>제목</code>), 본문(<code>body</code> | <code>Body</code>), 링크(<code>link</code> | <code>Interview Link</code> | <code>링크</code>) · 그 외 모든 컬럼은 <code>{`{컬럼명}`}</code>으로 치환 (예: <code>{`{name}`}</code>, <code>{`{candidate}`}</code>, <code>{`{position}`}</code>, <code>{`{code}`}</code>)
       </p>
 
       <section style={card}>
@@ -220,9 +256,17 @@ export default function HomePage() {
         {fileName && <div style={{ marginTop: 8, fontSize: 14, color: "#555" }}>📄 {fileName}</div>}
         {parseError && <div style={{ marginTop: 8, color: "#c00" }}>{parseError}</div>}
         {rows.length > 0 && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
-            ✅ {rows.length}건 파싱됨
-          </div>
+          <>
+            <div style={{ marginTop: 12, fontSize: 14 }}>
+              ✅ {rows.length}건 파싱됨
+            </div>
+            {(columnMap.email || columnMap.title || columnMap.body || columnMap.link) && (
+              <div style={{ marginTop: 10, padding: "8px 12px", background: "#f0f7ff", border: "1px solid #c7dffc", borderRadius: 6, fontSize: 12, color: "#234" }}>
+                <strong>매핑된 컬럼:</strong>{" "}
+                email = <code>{columnMap.email}</code> · title = <code>{columnMap.title}</code> · body = <code>{columnMap.body}</code> · link = <code>{columnMap.link}</code>
+              </div>
+            )}
+          </>
         )}
       </section>
 
