@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Papa from "papaparse";
 import { upload } from "@vercel/blob/client";
+import { renderBody } from "@/lib/markdown";
 
 const MAX_ATTACHMENT_BYTES = 500 * 1024 * 1024;
 // Above this raw total, attachments are sent as download links in the
@@ -50,6 +51,24 @@ function resolveColumns(headers: string[]): {
     else missing.push(slot);
   });
   return { map, missing };
+}
+
+// When a CSV author wraps the entire cell in straight quotes (often
+// pasted from another system that auto-quoted multiline text), Papa
+// faithfully preserves them. Strip a single pair if it brackets the
+// whole field.
+function stripWrappingQuotes(s: string): string {
+  if (!s) return s;
+  const leadingWs = s.match(/^\s*/)?.[0] ?? "";
+  const trailingWs = s.match(/\s*$/)?.[0] ?? "";
+  const core = s.slice(leadingWs.length, s.length - trailingWs.length);
+  if (core.length < 2) return s;
+  const first = core[0];
+  const last = core[core.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return leadingWs + core.slice(1, -1) + trailingWs;
+  }
+  return s;
 }
 
 function substitute(template: string, vars: Record<string, string>) {
@@ -176,8 +195,8 @@ export default function HomePage() {
             }
             return {
               email: (row[map.email!] ?? "").trim(),
-              title: (row[map.title!] ?? "").trim(),
-              body: row[map.body!] ?? "",
+              title: stripWrappingQuotes((row[map.title!] ?? "").trim()),
+              body: stripWrappingQuotes(row[map.body!] ?? ""),
               link: (row[map.link!] ?? "").trim(),
               vars,
             };
@@ -340,7 +359,7 @@ export default function HomePage() {
                 <div key={idx} style={preview}>
                   <div style={{ fontSize: 12, color: "#888" }}>To: {r.email}</div>
                   <div style={{ fontWeight: 600, marginTop: 4 }}>{r.title}</div>
-                  <div style={{ marginTop: 8, whiteSpace: "pre-wrap", fontSize: 14 }}>{r.body}</div>
+                  <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderBody(r.body) }} />
                   {r.link && (
                     <div style={{ marginTop: 12 }}>
                       <a

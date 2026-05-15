@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { newSendId, recordSend } from "@/lib/tracking";
+import { renderBody } from "@/lib/markdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,7 +61,7 @@ function buildDownloadText(files: DownloadEntry[]) {
 }
 
 function buildHtml(body: string, ctaUrl: string, pixelUrl: string, downloads: DownloadEntry[]) {
-  const bodyHtml = escapeHtml(body).replace(/\n/g, "<br/>");
+  const bodyHtml = renderBody(body);
   const downloadHtml = buildDownloadHtml(downloads);
   const linkHtml = ctaUrl
     ? `<p style="margin-top:24px"><a href="${escapeHtml(ctaUrl)}" style="display:inline-block;padding:12px 22px;background:#1a1a1a;color:white;text-decoration:none;border-radius:8px;font-weight:600">인터뷰 시작하기</a></p>`
