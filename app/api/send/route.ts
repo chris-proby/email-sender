@@ -80,14 +80,24 @@ function detectContentType(filename: string, browserType?: string) {
 
 type BlobAttachmentRef = { url: string; filename: string; contentType?: string };
 
+function normalizeFilename(name: string) {
+  // macOS file pickers often deliver Hangul filenames in NFD form
+  // (e.g. ㅎ+ㅏ+ㄴ instead of 한). Gmail tolerates it, but Outlook /
+  // Naver / Daum render the decomposed bytes as mojibake. Composing to
+  // NFC fixes the display across clients.
+  return (name || "").normalize("NFC");
+}
+
 async function fetchBlobAttachment(ref: BlobAttachmentRef) {
   const res = await fetch(ref.url);
   if (!res.ok) throw new Error(`첨부 다운로드 실패 (${res.status}): ${ref.filename}`);
   const buf = Buffer.from(await res.arrayBuffer());
+  const filename = normalizeFilename(ref.filename);
   return {
-    filename: ref.filename,
+    filename,
     content: buf,
-    contentType: detectContentType(ref.filename, ref.contentType),
+    contentType: detectContentType(filename, ref.contentType),
+    contentDisposition: "attachment" as const,
   };
 }
 
@@ -106,7 +116,7 @@ export async function POST(req: Request) {
   let body = "";
   let link = "";
   let baseUrl = "";
-  let attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
+  let attachments: { filename: string; content: Buffer; contentType?: string; contentDisposition?: "attachment" | "inline" }[] = [];
 
   const contentType = req.headers.get("content-type") || "";
 
@@ -123,10 +133,12 @@ export async function POST(req: Request) {
       for (const f of files) {
         if (f instanceof File && f.size > 0) {
           const buf = Buffer.from(await f.arrayBuffer());
+          const filename = normalizeFilename(f.name);
           attachments.push({
-            filename: f.name,
+            filename,
             content: buf,
-            contentType: detectContentType(f.name, f.type),
+            contentType: detectContentType(filename, f.type),
+            contentDisposition: "attachment",
           });
         }
       }
@@ -149,6 +161,17 @@ export async function POST(req: Request) {
 
   if (!email || !title) {
     return NextResponse.json({ error: "email, title 필수" }, { status: 400 });
+  }
+
+  // Gmail outbound caps at ~25MB encoded; raw payloads above ~19MB will
+  // fail with SMTP 552-5.3.4.
+  const totalAttachmentBytes = attachments.reduce((s, a) => s + a.content.length, 0);
+  if (totalAttachmentBytes > 19 * 1024 * 1024) {
+    const mb = (totalAttachmentBytes / 1024 / 1024).toFixed(1);
+    return NextResponse.json(
+      { error: `첨부 합계 ${mb}MB — Gmail 메시지 한도(19MB) 초과` },
+      { status: 413 },
+    );
   }
 
   const sendId = newSendId();

@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { recordOpen } from "@/lib/tracking";
 
 export const runtime = "nodejs";
@@ -11,7 +12,11 @@ const PIXEL = Buffer.from(
 export async function GET(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (id) {
-    recordOpen(id).catch(() => {});
+    after(async () => {
+      try {
+        await recordOpen(id);
+      } catch {}
+    });
   }
   return new Response(PIXEL, {
     headers: {

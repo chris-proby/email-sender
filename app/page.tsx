@@ -5,6 +5,9 @@ import Papa from "papaparse";
 import { upload } from "@vercel/blob/client";
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+// Gmail's outbound message size limit is ~25MB and base64 inflates
+// payloads by ~33%, so total raw attachment bytes must stay under ~19MB.
+const MAX_TOTAL_ATTACHMENT_BYTES = 19 * 1024 * 1024;
 
 type BlobAttachment = {
   url: string;
@@ -64,10 +67,20 @@ export default function HomePage() {
     const next: BlobAttachment[] = [];
     setUploading(true);
     try {
+      const existingTotal = attachments.reduce((s, a) => s + a.size, 0);
+      let projectedTotal = existingTotal;
       for (const file of Array.from(files)) {
         if (file.size > MAX_ATTACHMENT_BYTES) {
           throw new Error(`${file.name}: 25MB 초과 (Gmail 첨부 한도)`);
         }
+        projectedTotal += file.size;
+        if (projectedTotal > MAX_TOTAL_ATTACHMENT_BYTES) {
+          throw new Error(
+            `첨부 합계 ${(projectedTotal / 1024 / 1024).toFixed(1)}MB — Gmail 메시지 한도 초과 (총 19MB까지 안전)`,
+          );
+        }
+      }
+      for (const file of Array.from(files)) {
         setUploadProgress({ filename: file.name, pct: 0 });
         const blob = await upload(file.name, file, {
           access: "public",
@@ -199,7 +212,7 @@ export default function HomePage() {
         <a href="/dashboard" style={{ fontSize: 14 }}>📊 발송 대시보드 →</a>
       </div>
       <p style={{ color: "#666", marginTop: 0 }}>
-        필수 컬럼: <code>email, title, body, link</code> · 추가 컬럼은 <code>{`{컬럼명}`}</code> 또는 <code>{`{{컬럼명}}`}</code>로 title/body에 치환 (예: <code>{`{name}`}</code>, <code>{`{candidate}`}</code>, 한글 변수명도 지원)
+        필수 컬럼: <code>email, title, body, link</code> · 추가 컬럼은 <code>{`{컬럼명}`}</code> 또는 <code>{`{{컬럼명}}`}</code>로 title/body에 치환 (예: <code>{`{name}`}</code>, <code>{`{candidate}`}</code>, <code>{`{code}`}</code>, 한글 변수명도 지원)
       </p>
 
       <section style={card}>
@@ -220,7 +233,7 @@ export default function HomePage() {
       </section>
 
       <section style={card}>
-        <label style={{ fontWeight: 600 }}>2. 첨부파일 (선택, 모든 수신자 공통 · 파일당 최대 25MB)</label>
+        <label style={{ fontWeight: 600 }}>2. 첨부파일 (선택 · 파일당 25MB / 합계 19MB까지)</label>
         <input
           type="file"
           multiple
@@ -238,6 +251,11 @@ export default function HomePage() {
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>
               {attachments.length}개 · 총 {formatSize(totalAttachmentSize)}
+              {totalAttachmentSize > MAX_TOTAL_ATTACHMENT_BYTES && (
+                <span style={{ color: "#c00", marginLeft: 8 }}>
+                  ⚠ Gmail 메시지 한도 초과 (19MB)
+                </span>
+              )}
             </div>
             <div style={{ display: "grid", gap: 6 }}>
               {attachments.map((f, idx) => (

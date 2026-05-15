@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { recordClick } from "@/lib/tracking";
 
 export const runtime = "nodejs";
@@ -9,7 +10,13 @@ export async function GET(req: Request) {
   const to = url.searchParams.get("to");
 
   if (id) {
-    recordClick(id).catch(() => {});
+    // Run AFTER the redirect is sent so the Redis round-trip can't be
+    // lost when the function instance is reclaimed.
+    after(async () => {
+      try {
+        await recordClick(id);
+      } catch {}
+    });
   }
 
   if (!to) {
