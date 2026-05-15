@@ -31,8 +31,37 @@ function escapeHtml(s: string) {
     .replace(/'/g, "&#39;");
 }
 
-function buildHtml(body: string, ctaUrl: string, pixelUrl: string) {
+type DownloadEntry = { url: string; filename: string; size: number };
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function buildDownloadHtml(files: DownloadEntry[]) {
+  if (files.length === 0) return "";
+  const items = files
+    .map(
+      (f) =>
+        `<li style="margin:6px 0"><a href="${escapeHtml(f.url)}" style="color:#06c;text-decoration:underline">${escapeHtml(f.filename)}</a> <span style="color:#888;font-size:13px">(${formatBytes(f.size)})</span></li>`,
+    )
+    .join("");
+  return `<div style="margin-top:24px;padding:14px 16px;background:#f6f8fa;border:1px solid #e1e4e8;border-radius:8px">
+    <div style="font-weight:600;margin-bottom:6px">📎 첨부 파일 (다운로드)</div>
+    <ul style="margin:0;padding-left:20px">${items}</ul>
+  </div>`;
+}
+
+function buildDownloadText(files: DownloadEntry[]) {
+  if (files.length === 0) return "";
+  const lines = files.map((f) => `- ${f.filename} (${formatBytes(f.size)}): ${f.url}`).join("\n");
+  return `\n\n첨부 파일 (다운로드):\n${lines}`;
+}
+
+function buildHtml(body: string, ctaUrl: string, pixelUrl: string, downloads: DownloadEntry[]) {
   const bodyHtml = escapeHtml(body).replace(/\n/g, "<br/>");
+  const downloadHtml = buildDownloadHtml(downloads);
   const linkHtml = ctaUrl
     ? `<p style="margin-top:24px"><a href="${escapeHtml(ctaUrl)}" style="display:inline-block;padding:12px 22px;background:#1a1a1a;color:white;text-decoration:none;border-radius:8px;font-weight:600">인터뷰 시작하기</a></p>`
     : "";
@@ -41,6 +70,7 @@ function buildHtml(body: string, ctaUrl: string, pixelUrl: string) {
     : "";
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a">
     <div>${bodyHtml}</div>
+    ${downloadHtml}
     ${linkHtml}
     ${pixelHtml}
   </div>`;
@@ -78,7 +108,16 @@ function detectContentType(filename: string, browserType?: string) {
   return "application/octet-stream";
 }
 
-type BlobAttachmentRef = { url: string; filename: string; contentType?: string };
+type BlobAttachmentRef = { url: string; filename: string; contentType?: string; size?: number };
+
+type MailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+  contentDisposition?: "attachment" | "inline";
+};
+
+const INLINE_ATTACHMENT_THRESHOLD = 19 * 1024 * 1024;
 
 function normalizeFilename(name: string) {
   // macOS file pickers often deliver Hangul filenames in NFD form
@@ -116,7 +155,9 @@ export async function POST(req: Request) {
   let body = "";
   let link = "";
   let baseUrl = "";
-  let attachments: { filename: string; content: Buffer; contentType?: string; contentDisposition?: "attachment" | "inline" }[] = [];
+  const refs: BlobAttachmentRef[] = [];
+  let inlineFromMultipart: MailAttachment[] | null = null;
+  const attachmentsBuf: MailAttachment[] = [];
 
   const contentType = req.headers.get("content-type") || "";
 
@@ -134,7 +175,7 @@ export async function POST(req: Request) {
         if (f instanceof File && f.size > 0) {
           const buf = Buffer.from(await f.arrayBuffer());
           const filename = normalizeFilename(f.name);
-          attachments.push({
+          attachmentsBuf.push({
             filename,
             content: buf,
             contentType: detectContentType(filename, f.type),
@@ -142,6 +183,7 @@ export async function POST(req: Request) {
           });
         }
       }
+      inlineFromMultipart = attachmentsBuf;
     } else {
       const payload = await req.json();
       email = String(payload.email ?? "").trim();
@@ -149,11 +191,8 @@ export async function POST(req: Request) {
       body = String(payload.body ?? "");
       link = String(payload.link ?? "").trim();
       baseUrl = String(payload.baseUrl ?? "").trim();
-
-      const refs = Array.isArray(payload.attachments) ? (payload.attachments as BlobAttachmentRef[]) : [];
-      if (refs.length > 0) {
-        attachments = await Promise.all(refs.map(fetchBlobAttachment));
-      }
+      const parsed = Array.isArray(payload.attachments) ? (payload.attachments as BlobAttachmentRef[]) : [];
+      refs.push(...parsed);
     }
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Invalid request body" }, { status: 400 });
@@ -163,17 +202,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "email, title 필수" }, { status: 400 });
   }
 
-  // Gmail outbound caps at ~25MB encoded; raw payloads above ~19MB will
-  // fail with SMTP 552-5.3.4.
-  const totalAttachmentBytes = attachments.reduce((s, a) => s + a.content.length, 0);
-  if (totalAttachmentBytes > 19 * 1024 * 1024) {
-    const mb = (totalAttachmentBytes / 1024 / 1024).toFixed(1);
-    return NextResponse.json(
-      { error: `첨부 합계 ${mb}MB — Gmail 메시지 한도(19MB) 초과` },
-      { status: 413 },
-    );
-  }
-
   const sendId = newSendId();
   const resolvedBase = inferBaseUrl(req, baseUrl);
   const ctaUrl = link && resolvedBase
@@ -181,18 +209,40 @@ export async function POST(req: Request) {
     : link;
   const pixelUrl = resolvedBase ? `${resolvedBase}/api/track/open?id=${sendId}` : "";
 
+  // Decide: attach inline or render as download links in body.
+  // Multipart path always inlines (legacy / no Blob URLs); JSON path
+  // checks the total size of the referenced blobs and picks a mode.
+  let downloadEntries: DownloadEntry[] = [];
+  let finalAttachments: MailAttachment[] = [];
+
+  if (inlineFromMultipart) {
+    finalAttachments = inlineFromMultipart;
+  } else if (refs.length > 0) {
+    const totalReferenced = refs.reduce((s, r) => s + (r.size ?? 0), 0);
+    if (totalReferenced > INLINE_ATTACHMENT_THRESHOLD) {
+      downloadEntries = refs.map((r) => ({
+        url: r.url,
+        filename: normalizeFilename(r.filename),
+        size: r.size ?? 0,
+      }));
+    } else {
+      finalAttachments = await Promise.all(refs.map(fetchBlobAttachment));
+    }
+  }
+
   try {
     const transporter = getTransporter();
     const from = process.env.GMAIL_FROM || process.env.GMAIL_USER!;
-    const textBody = link ? `${body}\n\n인터뷰 시작하기: ${link}` : body;
+    const textBody =
+      (link ? `${body}\n\n인터뷰 시작하기: ${link}` : body) + buildDownloadText(downloadEntries);
 
     await transporter.sendMail({
       from,
       to: email,
       subject: title,
       text: textBody,
-      html: buildHtml(body, ctaUrl, pixelUrl),
-      attachments: attachments.length > 0 ? attachments : undefined,
+      html: buildHtml(body, ctaUrl, pixelUrl, downloadEntries),
+      attachments: finalAttachments.length > 0 ? finalAttachments : undefined,
     });
 
     recordSend(sendId, { email, title, link }).catch(() => {});

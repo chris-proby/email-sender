@@ -18,7 +18,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       request,
       onBeforeGenerateToken: async () => ({
         allowedContentTypes: undefined,
-        maximumSizeInBytes: 26 * 1024 * 1024,
+        maximumSizeInBytes: 500 * 1024 * 1024,
         addRandomSuffix: true,
         tokenPayload: JSON.stringify({}),
       }),

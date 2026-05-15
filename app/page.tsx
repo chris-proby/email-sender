@@ -4,10 +4,11 @@ import { useState } from "react";
 import Papa from "papaparse";
 import { upload } from "@vercel/blob/client";
 
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-// Gmail's outbound message size limit is ~25MB and base64 inflates
-// payloads by ~33%, so total raw attachment bytes must stay under ~19MB.
-const MAX_TOTAL_ATTACHMENT_BYTES = 19 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 500 * 1024 * 1024;
+// Above this raw total, attachments are sent as download links in the
+// email body instead of being attached (Gmail outbound caps at ~25MB
+// encoded, ~19MB raw after base64+MIME overhead).
+const INLINE_ATTACHMENT_THRESHOLD = 19 * 1024 * 1024;
 
 type BlobAttachment = {
   url: string;
@@ -67,17 +68,9 @@ export default function HomePage() {
     const next: BlobAttachment[] = [];
     setUploading(true);
     try {
-      const existingTotal = attachments.reduce((s, a) => s + a.size, 0);
-      let projectedTotal = existingTotal;
       for (const file of Array.from(files)) {
         if (file.size > MAX_ATTACHMENT_BYTES) {
-          throw new Error(`${file.name}: 25MB 초과 (Gmail 첨부 한도)`);
-        }
-        projectedTotal += file.size;
-        if (projectedTotal > MAX_TOTAL_ATTACHMENT_BYTES) {
-          throw new Error(
-            `첨부 합계 ${(projectedTotal / 1024 / 1024).toFixed(1)}MB — Gmail 메시지 한도 초과 (총 19MB까지 안전)`,
-          );
+          throw new Error(`${file.name}: 500MB 초과`);
         }
       }
       for (const file of Array.from(files)) {
@@ -181,6 +174,7 @@ export default function HomePage() {
               url: a.url,
               filename: a.filename,
               contentType: a.contentType,
+              size: a.size,
             })),
           }),
         });
@@ -233,7 +227,7 @@ export default function HomePage() {
       </section>
 
       <section style={card}>
-        <label style={{ fontWeight: 600 }}>2. 첨부파일 (선택 · 파일당 25MB / 합계 19MB까지)</label>
+        <label style={{ fontWeight: 600 }}>2. 첨부파일 (선택 · 합계 19MB 초과 시 본문 다운로드 링크로 자동 전환)</label>
         <input
           type="file"
           multiple
@@ -251,9 +245,9 @@ export default function HomePage() {
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>
               {attachments.length}개 · 총 {formatSize(totalAttachmentSize)}
-              {totalAttachmentSize > MAX_TOTAL_ATTACHMENT_BYTES && (
-                <span style={{ color: "#c00", marginLeft: 8 }}>
-                  ⚠ Gmail 메시지 한도 초과 (19MB)
+              {totalAttachmentSize > INLINE_ATTACHMENT_THRESHOLD && (
+                <span style={{ color: "#06c", marginLeft: 8 }}>
+                  ↪ 본문 다운로드 링크로 전송됨
                 </span>
               )}
             </div>
