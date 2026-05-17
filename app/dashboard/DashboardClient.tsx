@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -19,6 +20,9 @@ type Props = {
   records: SendRecord[];
   events: { open: number[]; cta: number[]; download: number[] };
   since: number;
+  until: number;
+  fromYmd: string;
+  toYmd: string;
 };
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -58,12 +62,27 @@ function bucketByHour(timestamps: number[]) {
 
 type Filter = "any" | "yes" | "no";
 
-export default function DashboardClient({ records, events, since }: Props) {
+export default function DashboardClient({ records, events, since, until, fromYmd, toYmd }: Props) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
   const [openFilter, setOpenFilter] = useState<Filter>("any");
   const [ctaFilter, setCtaFilter] = useState<Filter>("any");
   const [downloadFilter, setDownloadFilter] = useState<Filter>("any");
   const [search, setSearch] = useState("");
   const [showResend, setShowResend] = useState(false);
+  const [fromInput, setFromInput] = useState(fromYmd);
+  const [toInput, setToInput] = useState(toYmd);
+
+  function applyRange(nextFrom: string, nextTo: string) {
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(nextFrom) ? nextFrom : fromYmd;
+    let to = /^\d{4}-\d{2}-\d{2}$/.test(nextTo) ? nextTo : toYmd;
+    if (to < from) to = from;
+    setFromInput(from);
+    setToInput(to);
+    if (from === fromYmd && to === toYmd) return;
+    const params = new URLSearchParams({ from, to });
+    startTransition(() => router.replace(`/dashboard?${params.toString()}`));
+  }
 
   const chartData = useMemo(() => {
     const opens = bucketByHour(events.open);
@@ -75,8 +94,8 @@ export default function DashboardClient({ records, events, since }: Props) {
       ...downloads.keys(),
     ]);
     if (hours.size === 0) return [];
-    const earliest = Math.max(since, Math.min(...hours) - HOUR_MS);
-    const latest = Math.max(...hours) + HOUR_MS;
+    const earliest = Math.max(since, Math.min(...hours));
+    const latest = Math.min(until - HOUR_MS, Math.max(...hours));
     const series: { hour: number; label: string; opens: number; cta: number; download: number }[] = [];
     for (let h = Math.floor(earliest / HOUR_MS) * HOUR_MS; h <= latest; h += HOUR_MS) {
       series.push({
@@ -88,7 +107,7 @@ export default function DashboardClient({ records, events, since }: Props) {
       });
     }
     return series;
-  }, [events, since]);
+  }, [events, since, until]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -127,7 +146,7 @@ export default function DashboardClient({ records, events, since }: Props) {
 
   return (
     <main style={{ maxWidth: 1200, margin: "32px auto", padding: "0 20px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <h1 style={{ fontSize: 26, margin: 0 }}>발송 대시보드</h1>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <button onClick={() => setShowResend(true)} style={primaryBtn}>
@@ -136,6 +155,37 @@ export default function DashboardClient({ records, events, since }: Props) {
           <Link href="/" style={{ fontSize: 14 }}>← 발송 페이지로</Link>
         </div>
       </div>
+
+      <section style={{ ...card, padding: 14, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>기간 (KST)</span>
+        <input
+          type="date"
+          value={fromInput}
+          max={toInput}
+          onChange={(e) => setFromInput(e.target.value)}
+          onBlur={() => applyRange(fromInput, toInput)}
+          style={dateInput}
+        />
+        <span style={{ color: "#888" }}>~</span>
+        <input
+          type="date"
+          value={toInput}
+          min={fromInput}
+          onChange={(e) => setToInput(e.target.value)}
+          onBlur={() => applyRange(fromInput, toInput)}
+          style={dateInput}
+        />
+        <button
+          onClick={() => applyRange(fromInput, toInput)}
+          disabled={pending || (fromInput === fromYmd && toInput === toYmd)}
+          style={{ ...secondaryBtn, opacity: pending ? 0.6 : 1 }}
+        >
+          {pending ? "적용 중…" : "적용"}
+        </button>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
+          발송 {records.length}건 · 이벤트 {events.open.length + events.cta.length + events.download.length}건
+        </span>
+      </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 20 }}>
         <Stat label="총 발송" value={`${summary.total}건`} />
@@ -146,7 +196,7 @@ export default function DashboardClient({ records, events, since }: Props) {
 
       <section style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-          <h2 style={{ fontSize: 16, margin: 0 }}>시간별 이벤트 (최근 7일, KST)</h2>
+          <h2 style={{ fontSize: 16, margin: 0 }}>시간별 이벤트 ({fromYmd} ~ {toYmd}, KST)</h2>
           <div style={{ fontSize: 12, color: "#888" }}>{events.open.length + events.cta.length + events.download.length}개 이벤트</div>
         </div>
         {chartData.length === 0 ? (
@@ -458,6 +508,14 @@ const card: React.CSSProperties = {
   borderRadius: 12,
   padding: 20,
   marginTop: 20,
+};
+
+const dateInput: React.CSSProperties = {
+  padding: "6px 10px",
+  border: "1px solid #ddd",
+  borderRadius: 6,
+  fontSize: 13,
+  fontFamily: "inherit",
 };
 
 const th: React.CSSProperties = { padding: "10px 12px", fontWeight: 600, fontSize: 12, color: "#444" };

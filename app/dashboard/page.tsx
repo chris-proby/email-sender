@@ -5,9 +5,40 @@ import DashboardClient from "./DashboardClient";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const KST = "Asia/Seoul";
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
-export default async function Dashboard() {
+function todayKstYmd(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: KST,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function shiftKstYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+function parseKstYmdToUtcMs(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return Date.UTC(y, m - 1, d) - KST_OFFSET_MS;
+}
+
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
   if (!hasRedisConfig()) {
     return (
       <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 20px" }}>
@@ -19,19 +50,33 @@ export default async function Dashboard() {
     );
   }
 
-  const since = Date.now() - SEVEN_DAYS_MS;
-  const [records, openTs, ctaTs, downloadTs] = await Promise.all([
+  const sp = await searchParams;
+  const today = todayKstYmd();
+  const defaultFromYmd = shiftKstYmd(today, -6);
+  const fromYmd = YMD_RE.test(sp.from ?? "") ? sp.from! : defaultFromYmd;
+  const toYmdRaw = YMD_RE.test(sp.to ?? "") ? sp.to! : today;
+  const toYmd = toYmdRaw < fromYmd ? fromYmd : toYmdRaw;
+
+  const fromMs = parseKstYmdToUtcMs(fromYmd);
+  const untilMs = parseKstYmdToUtcMs(shiftKstYmd(toYmd, 1));
+
+  const [allRecords, openTs, ctaTs, downloadTs] = await Promise.all([
     listSends(1000),
-    getEventTimestamps("open", since),
-    getEventTimestamps("cta", since),
-    getEventTimestamps("download", since),
+    getEventTimestamps("open", fromMs, untilMs),
+    getEventTimestamps("cta", fromMs, untilMs),
+    getEventTimestamps("download", fromMs, untilMs),
   ]);
+
+  const records = allRecords.filter((r) => r.sentAt >= fromMs && r.sentAt < untilMs);
 
   return (
     <DashboardClient
       records={records}
       events={{ open: openTs, cta: ctaTs, download: downloadTs }}
-      since={since}
+      since={fromMs}
+      until={untilMs}
+      fromYmd={fromYmd}
+      toYmd={toYmd}
     />
   );
 }

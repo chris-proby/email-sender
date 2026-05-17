@@ -31,9 +31,13 @@ async function logEvent(kind: EventKind, sendId: string, ts: number) {
   await redis.zadd(`events:${kind}`, { score: ts, member });
 }
 
-export async function getEventTimestamps(kind: EventKind, sinceMs: number): Promise<number[]> {
+export async function getEventTimestamps(
+  kind: EventKind,
+  sinceMs: number,
+  untilMs?: number,
+): Promise<number[]> {
   if (!hasRedisConfig()) return [];
-  const members = (await redis.zrange<string[]>(`events:${kind}`, sinceMs, Date.now(), {
+  const members = (await redis.zrange<string[]>(`events:${kind}`, sinceMs, untilMs ?? Date.now(), {
     byScore: true,
   })) ?? [];
   return members
