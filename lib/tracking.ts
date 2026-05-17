@@ -31,18 +31,28 @@ async function logEvent(kind: EventKind, sendId: string, ts: number) {
   await redis.zadd(`events:${kind}`, { score: ts, member });
 }
 
-export async function getEventTimestamps(
+export type EventEntry = { id: string; ts: number };
+
+export async function getEvents(
   kind: EventKind,
   sinceMs: number,
   untilMs?: number,
-): Promise<number[]> {
+): Promise<EventEntry[]> {
   if (!hasRedisConfig()) return [];
   const members = (await redis.zrange<string[]>(`events:${kind}`, sinceMs, untilMs ?? Date.now(), {
     byScore: true,
   })) ?? [];
-  return members
-    .map((m) => Number(m.split(":")[1]))
-    .filter((n) => Number.isFinite(n));
+  const out: EventEntry[] = [];
+  for (const m of members) {
+    const i = m.indexOf(":");
+    if (i < 0) continue;
+    const id = m.slice(0, i);
+    const rest = m.slice(i + 1);
+    const j = rest.indexOf(":");
+    const ts = Number(j < 0 ? rest : rest.slice(0, j));
+    if (id && Number.isFinite(ts)) out.push({ id, ts });
+  }
+  return out;
 }
 
 export async function recordSend(id: string, data: { email: string; title: string; link: string }) {

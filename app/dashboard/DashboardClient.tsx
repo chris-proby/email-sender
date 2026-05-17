@@ -13,12 +13,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { SendRecord } from "@/lib/tracking";
+import type { SendRecord, EventEntry } from "@/lib/tracking";
 import { renderBody } from "@/lib/markdown";
 
 type Props = {
   records: SendRecord[];
-  events: { open: number[]; cta: number[]; download: number[] };
+  events: { open: EventEntry[]; cta: EventEntry[]; download: EventEntry[] };
   since: number;
   until: number;
   fromYmd: string;
@@ -51,9 +51,14 @@ function fmtKSTShort(ts: number) {
   });
 }
 
-function bucketByHour(timestamps: number[]) {
+function bucketUniqueByHour(events: EventEntry[]) {
+  const first = new Map<string, number>();
+  for (const e of events) {
+    const cur = first.get(e.id);
+    if (cur === undefined || e.ts < cur) first.set(e.id, e.ts);
+  }
   const out = new Map<number, number>();
-  for (const ts of timestamps) {
+  for (const ts of first.values()) {
     const hour = Math.floor(ts / HOUR_MS) * HOUR_MS;
     out.set(hour, (out.get(hour) ?? 0) + 1);
   }
@@ -85,9 +90,9 @@ export default function DashboardClient({ records, events, since, until, fromYmd
   }
 
   const chartData = useMemo(() => {
-    const opens = bucketByHour(events.open);
-    const ctas = bucketByHour(events.cta);
-    const downloads = bucketByHour(events.download);
+    const opens = bucketUniqueByHour(events.open);
+    const ctas = bucketUniqueByHour(events.cta);
+    const downloads = bucketUniqueByHour(events.download);
     const hours = new Set<number>([
       ...opens.keys(),
       ...ctas.keys(),
@@ -183,7 +188,7 @@ export default function DashboardClient({ records, events, since, until, fromYmd
           {pending ? "적용 중…" : "적용"}
         </button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
-          발송 {records.length}건 · 이벤트 {events.open.length + events.cta.length + events.download.length}건
+          발송 {records.length}건 · 유니크 오픈 {new Set(events.open.map((e) => e.id)).size}명 / CTA {new Set(events.cta.map((e) => e.id)).size}명 / 다운로드 {new Set(events.download.map((e) => e.id)).size}명
         </span>
       </section>
 
@@ -197,7 +202,7 @@ export default function DashboardClient({ records, events, since, until, fromYmd
       <section style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <h2 style={{ fontSize: 16, margin: 0 }}>시간별 이벤트 ({fromYmd} ~ {toYmd}, KST)</h2>
-          <div style={{ fontSize: 12, color: "#888" }}>{events.open.length + events.cta.length + events.download.length}개 이벤트</div>
+          <div style={{ fontSize: 12, color: "#888" }}>유니크 인원 기준</div>
         </div>
         {chartData.length === 0 ? (
           <div style={{ color: "#888", fontSize: 13, padding: "24px 0", textAlign: "center" }}>아직 이벤트가 없습니다.</div>
@@ -270,9 +275,9 @@ export default function DashboardClient({ records, events, since, until, fromYmd
                     <td style={td}>{fmtKST(r.sentAt)}</td>
                     <td style={td}>{r.email}</td>
                     <td style={{ ...td, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</td>
-                    <td style={{ ...td, textAlign: "center", color: r.opens > 0 ? "#0a7" : "#aaa", fontWeight: 600 }}>{r.opens}</td>
-                    <td style={{ ...td, textAlign: "center", color: r.clicks > 0 ? "#06c" : "#aaa", fontWeight: 600 }}>{r.clicks}</td>
-                    <td style={{ ...td, textAlign: "center", color: r.downloadClicks > 0 ? "#a60" : "#aaa", fontWeight: 600 }}>{r.downloadClicks}</td>
+                    <td style={{ ...td, textAlign: "center", color: r.opens > 0 ? "#0a7" : "#aaa", fontWeight: 600 }}>{r.opens > 0 ? 1 : 0}</td>
+                    <td style={{ ...td, textAlign: "center", color: r.clicks > 0 ? "#06c" : "#aaa", fontWeight: 600 }}>{r.clicks > 0 ? 1 : 0}</td>
+                    <td style={{ ...td, textAlign: "center", color: r.downloadClicks > 0 ? "#a60" : "#aaa", fontWeight: 600 }}>{r.downloadClicks > 0 ? 1 : 0}</td>
                     <td style={td}>{fmtKST(r.firstOpenedAt)}</td>
                     <td style={td}>{fmtKST(r.firstClickedAt)}</td>
                     <td style={td}>{fmtKST(r.firstDownloadAt)}</td>

@@ -1,4 +1,4 @@
-import { listSends, getEventTimestamps } from "@/lib/tracking";
+import { listSends, getEvents } from "@/lib/tracking";
 import { hasRedisConfig } from "@/lib/redis";
 import DashboardClient from "./DashboardClient";
 
@@ -60,11 +60,11 @@ export default async function Dashboard({
   const fromMs = parseKstYmdToUtcMs(fromYmd);
   const untilMs = parseKstYmdToUtcMs(shiftKstYmd(toYmd, 1));
 
-  const [allRecords, openTs, ctaTs, downloadTs] = await Promise.all([
+  const [allRecords, openEv, ctaEv, downloadEv] = await Promise.all([
     listSends(1000),
-    getEventTimestamps("open", fromMs, untilMs),
-    getEventTimestamps("cta", fromMs, untilMs),
-    getEventTimestamps("download", fromMs, untilMs),
+    getEvents("open", fromMs, untilMs),
+    getEvents("cta", fromMs, untilMs),
+    getEvents("download", fromMs, untilMs),
   ]);
 
   const records = allRecords.filter((r) => r.sentAt >= fromMs && r.sentAt < untilMs);
@@ -72,7 +72,7 @@ export default async function Dashboard({
   return (
     <DashboardClient
       records={records}
-      events={{ open: openTs, cta: ctaTs, download: downloadTs }}
+      events={{ open: openEv, cta: ctaEv, download: downloadEv }}
       since={fromMs}
       until={untilMs}
       fromYmd={fromYmd}
