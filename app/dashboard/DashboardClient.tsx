@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -77,7 +77,7 @@ export default function DashboardClient({ records, events, since, until, fromYmd
   const [showResend, setShowResend] = useState(false);
   const [fromInput, setFromInput] = useState(fromYmd);
   const [toInput, setToInput] = useState(toYmd);
-  const [domainFilter, setDomainFilter] = useState<string>("");
+  const [domainFilters, setDomainFilters] = useState<string[]>([]);
 
   function applyRange(nextFrom: string, nextTo: string) {
     const from = /^\d{4}-\d{2}-\d{2}$/.test(nextFrom) ? nextFrom : fromYmd;
@@ -102,10 +102,13 @@ export default function DashboardClient({ records, events, since, until, fromYmd
   }, [records]);
 
   const domainRecords = useMemo(() => {
-    if (!domainFilter) return records;
-    const suffix = "@" + domainFilter.toLowerCase();
-    return records.filter((r) => r.email.toLowerCase().endsWith(suffix));
-  }, [records, domainFilter]);
+    if (domainFilters.length === 0) return records;
+    const suffixes = domainFilters.map((d) => "@" + d.toLowerCase());
+    return records.filter((r) => {
+      const e = r.email.toLowerCase();
+      return suffixes.some((s) => e.endsWith(s));
+    });
+  }, [records, domainFilters]);
 
   const recordIdSet = useMemo(() => new Set(domainRecords.map((r) => r.id)), [domainRecords]);
 
@@ -224,23 +227,23 @@ export default function DashboardClient({ records, events, since, until, fromYmd
           {pending ? "적용 중…" : "적용"}
         </button>
         <span style={{ marginLeft: 12, fontSize: 13, fontWeight: 600, color: "#555" }}>도메인</span>
-        <select
-          value={domainFilter}
-          onChange={(e) => setDomainFilter(e.target.value)}
-          style={{ ...dateInput, minWidth: 160 }}
-        >
-          <option value="">전체 ({records.length})</option>
-          {domains.map(([d, n]) => (
-            <option key={d} value={d}>@{d} ({n})</option>
-          ))}
-        </select>
+        <DomainMultiSelect
+          domains={domains}
+          value={domainFilters}
+          onChange={setDomainFilters}
+          totalCount={records.length}
+        />
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
           발송 {domainRecords.length}건 · 유니크 오픈 {openedIds.size}명 / CTA {ctaIds.size}명 / 다운로드 {downloadedIds.size}명
         </span>
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 20 }}>
-        <Stat label="총 발송" value={`${summary.total}건`} hint={domainFilter ? `@${domainFilter}` : "전체 도메인"} />
+        <Stat
+          label="총 발송"
+          value={`${summary.total}건`}
+          hint={domainFilters.length === 0 ? "전체 도메인" : domainFilters.map((d) => `@${d}`).join(", ")}
+        />
         <Stat label="오픈" value={`${summary.opened}명 (${summary.openRate}%)`} hint="기간 내 유니크 수신자" />
         <Stat label="Proby CTA 클릭" value={`${summary.clicked}명 (${summary.clickRate}%)`} hint="인터뷰 시작하기 버튼" />
         <Stat label="첨부 다운로드 클릭" value={`${summary.downloaded}명 (${summary.downloadRate}%)`} hint="본문 내 다운로드 링크" />
@@ -368,6 +371,111 @@ function FilterSelect({
         <option value="no">미발생</option>
       </select>
     </label>
+  );
+}
+
+function DomainMultiSelect({
+  domains,
+  value,
+  onChange,
+  totalCount,
+}: {
+  domains: [string, number][];
+  value: string[];
+  onChange: (v: string[]) => void;
+  totalCount: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const label =
+    value.length === 0
+      ? `전체 (${totalCount})`
+      : value.length === 1
+        ? `@${value[0]}`
+        : `@${value[0]} +${value.length - 1}`;
+
+  function toggle(d: string) {
+    onChange(value.includes(d) ? value.filter((x) => x !== d) : [...value, d]);
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          ...dateInput,
+          minWidth: 180,
+          textAlign: "left",
+          cursor: "pointer",
+          background: "white",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ color: "#888", fontSize: 10 }}>▾</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 20,
+            background: "white",
+            border: "1px solid #ddd",
+            borderRadius: 6,
+            padding: 6,
+            minWidth: 240,
+            maxHeight: 320,
+            overflow: "auto",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+          }}
+        >
+          <div style={{ display: "flex", gap: 6, padding: "4px 6px 6px", borderBottom: "1px solid #eee", marginBottom: 4 }}>
+            <button type="button" onClick={() => onChange(domains.map(([d]) => d))} style={miniBtn}>모두</button>
+            <button type="button" onClick={() => onChange([])} style={miniBtn}>해제</button>
+          </div>
+          {domains.length === 0 ? (
+            <div style={{ padding: "8px 6px", color: "#888", fontSize: 12 }}>도메인 없음</div>
+          ) : (
+            domains.map(([d, n]) => (
+              <label
+                key={d}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 8px",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  borderRadius: 4,
+                }}
+              >
+                <input type="checkbox" checked={value.includes(d)} onChange={() => toggle(d)} />
+                <span style={{ flex: 1 }}>@{d}</span>
+                <span style={{ color: "#888", fontSize: 12 }}>{n}</span>
+              </label>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -560,6 +668,16 @@ const card: React.CSSProperties = {
   borderRadius: 12,
   padding: 20,
   marginTop: 20,
+};
+
+const miniBtn: React.CSSProperties = {
+  background: "white",
+  color: "#333",
+  border: "1px solid #ddd",
+  borderRadius: 4,
+  padding: "3px 8px",
+  fontSize: 12,
+  cursor: "pointer",
 };
 
 const dateInput: React.CSSProperties = {
