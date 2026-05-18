@@ -77,6 +77,7 @@ export default function DashboardClient({ records, events, since, until, fromYmd
   const [showResend, setShowResend] = useState(false);
   const [fromInput, setFromInput] = useState(fromYmd);
   const [toInput, setToInput] = useState(toYmd);
+  const [domainFilter, setDomainFilter] = useState<string>("");
 
   function applyRange(nextFrom: string, nextTo: string) {
     const from = /^\d{4}-\d{2}-\d{2}$/.test(nextFrom) ? nextFrom : fromYmd;
@@ -89,10 +90,42 @@ export default function DashboardClient({ records, events, since, until, fromYmd
     startTransition(() => router.replace(`/dashboard?${params.toString()}`));
   }
 
+  const domains = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of records) {
+      const at = r.email.indexOf("@");
+      if (at < 0) continue;
+      const d = r.email.slice(at + 1).toLowerCase();
+      if (d) counts.set(d, (counts.get(d) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [records]);
+
+  const domainRecords = useMemo(() => {
+    if (!domainFilter) return records;
+    const suffix = "@" + domainFilter.toLowerCase();
+    return records.filter((r) => r.email.toLowerCase().endsWith(suffix));
+  }, [records, domainFilter]);
+
+  const recordIdSet = useMemo(() => new Set(domainRecords.map((r) => r.id)), [domainRecords]);
+
+  const scopedEvents = useMemo(
+    () => ({
+      open: events.open.filter((e) => recordIdSet.has(e.id)),
+      cta: events.cta.filter((e) => recordIdSet.has(e.id)),
+      download: events.download.filter((e) => recordIdSet.has(e.id)),
+    }),
+    [events, recordIdSet],
+  );
+
+  const openedIds = useMemo(() => new Set(scopedEvents.open.map((e) => e.id)), [scopedEvents]);
+  const ctaIds = useMemo(() => new Set(scopedEvents.cta.map((e) => e.id)), [scopedEvents]);
+  const downloadedIds = useMemo(() => new Set(scopedEvents.download.map((e) => e.id)), [scopedEvents]);
+
   const chartData = useMemo(() => {
-    const opens = bucketUniqueByHour(events.open);
-    const ctas = bucketUniqueByHour(events.cta);
-    const downloads = bucketUniqueByHour(events.download);
+    const opens = bucketUniqueByHour(scopedEvents.open);
+    const ctas = bucketUniqueByHour(scopedEvents.cta);
+    const downloads = bucketUniqueByHour(scopedEvents.download);
     const hours = new Set<number>([
       ...opens.keys(),
       ...ctas.keys(),
@@ -112,27 +145,30 @@ export default function DashboardClient({ records, events, since, until, fromYmd
       });
     }
     return series;
-  }, [events, since, until]);
+  }, [scopedEvents, since, until]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return records.filter((r) => {
-      if (openFilter === "yes" && r.opens === 0) return false;
-      if (openFilter === "no" && r.opens > 0) return false;
-      if (ctaFilter === "yes" && r.clicks === 0) return false;
-      if (ctaFilter === "no" && r.clicks > 0) return false;
-      if (downloadFilter === "yes" && r.downloadClicks === 0) return false;
-      if (downloadFilter === "no" && r.downloadClicks > 0) return false;
+    return domainRecords.filter((r) => {
+      const opened = openedIds.has(r.id);
+      const clicked = ctaIds.has(r.id);
+      const downloaded = downloadedIds.has(r.id);
+      if (openFilter === "yes" && !opened) return false;
+      if (openFilter === "no" && opened) return false;
+      if (ctaFilter === "yes" && !clicked) return false;
+      if (ctaFilter === "no" && clicked) return false;
+      if (downloadFilter === "yes" && !downloaded) return false;
+      if (downloadFilter === "no" && downloaded) return false;
       if (q && !r.email.toLowerCase().includes(q) && !r.title.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [records, openFilter, ctaFilter, downloadFilter, search]);
+  }, [domainRecords, openFilter, ctaFilter, downloadFilter, search, openedIds, ctaIds, downloadedIds]);
 
   const summary = useMemo(() => {
-    const total = records.length;
-    const opened = records.filter((r) => r.opens > 0).length;
-    const clicked = records.filter((r) => r.clicks > 0).length;
-    const downloaded = records.filter((r) => r.downloadClicks > 0).length;
+    const total = domainRecords.length;
+    const opened = openedIds.size;
+    const clicked = ctaIds.size;
+    const downloaded = downloadedIds.size;
     return {
       total,
       opened,
@@ -142,11 +178,11 @@ export default function DashboardClient({ records, events, since, until, fromYmd
       clickRate: total ? Math.round((clicked / total) * 100) : 0,
       downloadRate: total ? Math.round((downloaded / total) * 100) : 0,
     };
-  }, [records]);
+  }, [domainRecords, openedIds, ctaIds, downloadedIds]);
 
   const nonOpenerEmails = useMemo(
-    () => records.filter((r) => r.opens === 0).map((r) => r.email).filter(Boolean),
-    [records],
+    () => domainRecords.filter((r) => !openedIds.has(r.id)).map((r) => r.email).filter(Boolean),
+    [domainRecords, openedIds],
   );
 
   return (
@@ -187,16 +223,27 @@ export default function DashboardClient({ records, events, since, until, fromYmd
         >
           {pending ? "적용 중…" : "적용"}
         </button>
+        <span style={{ marginLeft: 12, fontSize: 13, fontWeight: 600, color: "#555" }}>도메인</span>
+        <select
+          value={domainFilter}
+          onChange={(e) => setDomainFilter(e.target.value)}
+          style={{ ...dateInput, minWidth: 160 }}
+        >
+          <option value="">전체 ({records.length})</option>
+          {domains.map(([d, n]) => (
+            <option key={d} value={d}>@{d} ({n})</option>
+          ))}
+        </select>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
-          발송 {records.length}건 · 유니크 오픈 {new Set(events.open.map((e) => e.id)).size}명 / CTA {new Set(events.cta.map((e) => e.id)).size}명 / 다운로드 {new Set(events.download.map((e) => e.id)).size}명
+          발송 {domainRecords.length}건 · 유니크 오픈 {openedIds.size}명 / CTA {ctaIds.size}명 / 다운로드 {downloadedIds.size}명
         </span>
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 20 }}>
-        <Stat label="총 발송" value={`${summary.total}건`} />
-        <Stat label="오픈" value={`${summary.opened}건 (${summary.openRate}%)`} hint="고유 수신자 기준" />
-        <Stat label="Proby CTA 클릭" value={`${summary.clicked}건 (${summary.clickRate}%)`} hint="인터뷰 시작하기 버튼" />
-        <Stat label="첨부 다운로드 클릭" value={`${summary.downloaded}건 (${summary.downloadRate}%)`} hint="본문 내 다운로드 링크" />
+        <Stat label="총 발송" value={`${summary.total}건`} hint={domainFilter ? `@${domainFilter}` : "전체 도메인"} />
+        <Stat label="오픈" value={`${summary.opened}명 (${summary.openRate}%)`} hint="기간 내 유니크 수신자" />
+        <Stat label="Proby CTA 클릭" value={`${summary.clicked}명 (${summary.clickRate}%)`} hint="인터뷰 시작하기 버튼" />
+        <Stat label="첨부 다운로드 클릭" value={`${summary.downloaded}명 (${summary.downloadRate}%)`} hint="본문 내 다운로드 링크" />
       </section>
 
       <section style={card}>
@@ -275,9 +322,9 @@ export default function DashboardClient({ records, events, since, until, fromYmd
                     <td style={td}>{fmtKST(r.sentAt)}</td>
                     <td style={td}>{r.email}</td>
                     <td style={{ ...td, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</td>
-                    <td style={{ ...td, textAlign: "center", color: r.opens > 0 ? "#0a7" : "#aaa", fontWeight: 600 }}>{r.opens > 0 ? 1 : 0}</td>
-                    <td style={{ ...td, textAlign: "center", color: r.clicks > 0 ? "#06c" : "#aaa", fontWeight: 600 }}>{r.clicks > 0 ? 1 : 0}</td>
-                    <td style={{ ...td, textAlign: "center", color: r.downloadClicks > 0 ? "#a60" : "#aaa", fontWeight: 600 }}>{r.downloadClicks > 0 ? 1 : 0}</td>
+                    <td style={{ ...td, textAlign: "center", color: openedIds.has(r.id) ? "#0a7" : "#aaa", fontWeight: 600 }}>{openedIds.has(r.id) ? 1 : 0}</td>
+                    <td style={{ ...td, textAlign: "center", color: ctaIds.has(r.id) ? "#06c" : "#aaa", fontWeight: 600 }}>{ctaIds.has(r.id) ? 1 : 0}</td>
+                    <td style={{ ...td, textAlign: "center", color: downloadedIds.has(r.id) ? "#a60" : "#aaa", fontWeight: 600 }}>{downloadedIds.has(r.id) ? 1 : 0}</td>
                     <td style={td}>{fmtKST(r.firstOpenedAt)}</td>
                     <td style={td}>{fmtKST(r.firstClickedAt)}</td>
                     <td style={td}>{fmtKST(r.firstDownloadAt)}</td>
