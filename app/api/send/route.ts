@@ -19,6 +19,11 @@ function getTransporter() {
   cachedTransporter = nodemailer.createTransport({
     service: "gmail",
     auth: { user, pass },
+    pool: true,
+    maxConnections: 1,
+    maxMessages: 100,
+    rateDelta: 1000,
+    rateLimit: 5,
   });
   return cachedTransporter;
 }
